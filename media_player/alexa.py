@@ -1157,8 +1157,4 @@ class AlexaAPI():
             _LOGGER.error("An error occured accessing the API: {}".format(
                 message))
             return None
-<<<<<<< HEAD
             
-=======
-            
->>>>>>> 3987b4dd57e13fba2e5f9938c1cf2f48e65447e9
