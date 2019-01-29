@@ -68,6 +68,8 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
         vol.All(cv.ensure_list, [cv.string]),
 })
 
+ACTIVITY_RECORDS = "4"
+
 
 def request_configuration(hass, config, setup_platform_callback,
                           status=None):
@@ -445,7 +447,11 @@ class AlexaClient(MediaPlayerDevice):
         return ['Local Speaker'] + sources
 
     def _get_last_called(self):
-        if self._device_serial_number == self.alexa_api.get_last_device_serial():
+        last_called_device_serial = self.alexa_api.get_last_device_serial()
+        #last_alexa = self.alexa_api.get_last_alexa()
+        #_LOGGER.debug("\nlast alexa: {}\n".format(last_alexa))
+
+        if self._device_serial_number == last_called_device_serial:
             return True
         return False
 
@@ -627,7 +633,8 @@ class AlexaClient(MediaPlayerDevice):
         """Return the scene state attributes."""
         attr = {
             'available': self._available,
-            'last_called': self._last_called
+            'last_called': self._last_called,
+            'unique_id': self._device_serial_number
         }
         return attr
 
@@ -968,6 +975,8 @@ class AlexaAPI():
         self._session = session
         self._url = 'https://alexa.' + url
 
+        self._devices = None
+
         csrf = self._session.cookies.get_dict()['csrf']
         self._session.headers['csrf'] = csrf
 
@@ -991,23 +1000,58 @@ class AlexaAPI():
             _LOGGER.error("An error occured accessing the API: {}".format(
                 message))
             return None
+    
+    # def get_last_alexa(self):
+    #     """Identify the last called alexa's name."""
+    #     if self._devices is None:
+    #         self._devices = self.get_devices(self._url, self._session)
+    #     _LOGGER.debug("\ndevices: {}\n".format(devices))
+    #     if devices is not None:
+    #         json_devices = devices.json()
+    #         _LOGGER.debug("\ndevice_name: {}\n".format(json_devices[0]['accountName']))
+    #         #for device in devices:
+    #         #    device_name = device['accountName']
+    #         #    _LOGGER.debug("\ndevice_name: {}\n".format(device_name))
 
     def get_last_device_serial(self):
         """Identify the last device's serial number."""
         try:
-            response = self._get_request('/api/activities?startTime=&size=1&offset=1')
-            last_activity = response.json()['activities'][0]
+            #response = self._get_request('/api/activities?startTime=&size=1&offset=1')
+            #last_activity = response.json()['activities'][0]
+
+            activities = self._get_request('/api/activities?startTime=' +
+                                            '&size=' + ACTIVITY_RECORDS + 
+                                            '&offset=1')
+            if activities is not None:
+                json_activities = activities.json()['activities']
+                for activity in json_activities:
+                    # Retrieve the useful values.
+                    status = activity['activityStatus']
+                    description_list = activity['description'].strip('{}').split(',')
+                    summary = description_list[0]
+                    summary = summary[summary.index(":")+1:len(summary)].strip('"')
+                    
+                    # Define the logic which constitutes the correct activity.
+                    success = (status == "SUCCESS")
+                    unknown = (summary == "Unknown")
+                    simon_says = summary.startswith('simon says')
+                    #_LOGGER.debug("\nsummary: {}\nstatus: {}\nsimon_says: {}\n".format(summary, status, simon_says))    
+                    if success and not unknown and not simon_says:
+                        device_serial_number = activity['sourceDeviceIds'][0]['serialNumber']
+                        #_LOGGER.debug("\ndevice_serial_number: {}\n".format(device_serial_number))
+                        break
+                    else:
+                        device_serial_number = None
+            else:
+                device_serial_number = None
+            
+            return device_serial_number
+            
         except Exception as ex:
             template = ("An exception of type {0} occurred."
                         " Arguments:\n{1!r}")
             message = template.format(type(ex).__name__, ex.args)
-            _LOGGER.debug("An error occured accessing the API: {}".format(message))
-            return None
-
-        # Ignore discarded activity records
-        if last_activity['activityStatus'][0] != 'DISCARDED_NON_DEVICE_DIRECTED_INTENT':
-            return last_activity['sourceDeviceIds'][0]['serialNumber']
-        else:
+            _LOGGER.debug(message)
             return None
 
     def play_music(self, provider_id, search_phrase, customer_id=None):
@@ -1134,7 +1178,8 @@ class AlexaAPI():
         try:
             response = session.get('https://alexa.' + url +
                                    '/api/devices-v2/device')
-            return response.json()['devices']
+            devices = response.json()['devices']
+            return devices
         except Exception as ex:
             template = ("An exception of type {0} occurred."
                         " Arguments:\n{1!r}")
